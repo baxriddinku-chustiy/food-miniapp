@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Food Delivery Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-900 font-sans pb-28 select-none">
+
+    <!-- Шапка с адресом -->
+    <div class="bg-white p-4 shadow-sm sticky top-0 z-10 flex items-center justify-between">
+        <div onclick="changeAddress()" class="cursor-pointer">
+            <p class="text-xs text-gray-400">Адрес доставки (нажми, чтобы изменить)</p>
+            <h1 id="addressDisplay" class="font-bold text-sm text-gray-800">📍 Ташкент, ул. Амира Темура, 1</h1>
+        </div>
+        <button id="backBtn" onclick="showRestaurants()" class="hidden bg-gray-100 px-3 py-1.5 rounded-xl text-sm font-semibold active:scale-95">
+            ← Назад
+        </button>
+    </div>
+
+    <!-- Список ресторанов -->
+    <div id="restaurantsView" class="p-4 space-y-3">
+        <h2 class="text-xl font-extrabold">Рестораны</h2>
+        <div id="restaurantsList" class="space-y-3"></div>
+    </div>
+
+    <!-- Меню ресторана -->
+    <div id="menuView" class="p-4 hidden">
+        <h2 id="restaurantTitle" class="text-xl font-extrabold mb-3">Меню</h2>
+        <div id="dishesList" class="grid grid-cols-2 gap-3"></div>
+    </div>
+
+    <!-- Плавающая кнопка корзины -->
+    <div id="cartBar" onclick="checkout()" class="fixed bottom-4 left-4 right-4 bg-yellow-400 text-black p-4 rounded-2xl shadow-xl hidden flex justify-between items-center font-bold active:scale-95 transition cursor-pointer">
+        <span id="cartCount" class="bg-black text-white px-2.5 py-1 rounded-lg text-sm">0</span>
+        <span>Оформить заказ</span>
+        <span><span id="cartTotal">0</span> сум</span>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        let cart = {};
+        let deliveryAddress = "Ташкент, ул. Амира Темура, 1";
+
+        function changeAddress() {
+            const newAddr = prompt("Введите адрес доставки:", deliveryAddress);
+            if (newAddr && newAddr.trim() !== "") {
+                deliveryAddress = newAddr.trim();
+                document.getElementById('addressDisplay').innerText = "📍 " + deliveryAddress;
+            }
+        }
+
+        async function loadRestaurants() {
+            const res = await fetch('/api/restaurants');
+            const data = await res.json();
+            const list = document.getElementById('restaurantsList');
+            list.innerHTML = '';
+            data.forEach(r => {
+                list.innerHTML += `
+                    <div onclick="openMenu(${r.id}, '${r.name}')" class="bg-white p-4 rounded-2xl shadow-sm flex items-center space-x-4 active:scale-95 transition cursor-pointer">
+                        <div class="text-4xl bg-gray-50 p-3 rounded-2xl">${r.img}</div>
+                        <div>
+                            <h3 class="font-bold text-lg">${r.name}</h3>
+                            <p class="text-xs text-gray-400">${r.cat}</p>
+                            <div class="flex space-x-2 mt-1.5 text-xs font-semibold">
+                                <span class="bg-gray-100 px-2 py-0.5 rounded-md">⭐ ${r.rate}</span>
+                                <span class="bg-gray-100 px-2 py-0.5 rounded-md">🛵 ${r.time}</span>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        async function openMenu(id, name) {
+            document.getElementById('restaurantsView').classList.add('hidden');
+            document.getElementById('menuView').classList.remove('hidden');
+            document.getElementById('backBtn').classList.remove('hidden');
+            document.getElementById('restaurantTitle').innerText = name;
+
+            const res = await fetch('/api/dishes/' + id);
+            const dishes = await res.json();
+            const list = document.getElementById('dishesList');
+            list.innerHTML = '';
+            dishes.forEach(d => {
+                list.innerHTML += `
+                    <div class="bg-white p-3 rounded-2xl shadow-sm flex flex-col justify-between">
+                        <div>
+                            <div class="text-5xl text-center py-4 bg-gray-50 rounded-xl mb-2">${d.img}</div>
+                            <p class="font-bold text-sm leading-tight">${d.name}</p>
+                            <p class="text-xs text-gray-400 mt-1">${d.weight}</p>
+                        </div>
+                        <button onclick="add(${d.id}, '${d.name}', ${d.price}, ${id})" class="mt-3 w-full bg-gray-100 active:bg-yellow-400 font-bold py-2 rounded-xl text-sm transition">
+                            + ${d.price.toLocaleString()} сум
+                        </button>
+                    </div>`;
+            });
+        }
+
+        function showRestaurants() {
+            document.getElementById('menuView').classList.add('hidden');
+            document.getElementById('restaurantsView').classList.remove('hidden');
+            document.getElementById('backBtn').classList.add('hidden');
+        }
+
+        function add(id, name, price, restId) {
+            const items = Object.values(cart);
+            if (items.length > 0 && items[0].restId !== restId) {
+                if (!confirm("В корзине блюда из другого ресторана. Очистить корзину?")) return;
+                cart = {};
+            }
+            if (!cart[id]) cart[id] = { name, price, qty: 0, restId };
+            cart[id].qty++;
+            renderCart();
+        }
+
+        function renderCart() {
+            let qty = 0, total = 0;
+            Object.values(cart).forEach(i => { qty += i.qty; total += i.qty * i.price; });
+            const bar = document.getElementById('cartBar');
+            if (qty > 0) {
+                bar.classList.remove('hidden');
+                document.getElementById('cartCount').innerText = qty;
+                document.getElementById('cartTotal').innerText = total.toLocaleString();
+            } else {
+                bar.classList.add('hidden');
+            }
+        }
+
+        async function checkout() {
+            const items = Object.values(cart);
+            let total = 0;
+            items.forEach(i => total += i.qty * i.price);
+
+            const user = tg.initDataUnsafe?.user;
+            const payload = {
+                user_id: user?.id || null,
+                user_name: user?.first_name || "Гость",
+                address: deliveryAddress,
+                items: items,
+                total: total
+            };
+
+            const res = await fetch('/api/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                cart = {};
+                renderCart();
+                tg.showAlert("✅ Заказ успешно оформлен! Чек отправлен в чат бота.");
+                tg.close();
+            }
+        }
+
+        loadRestaurants();
+    </script>
+</body>
+</html>
